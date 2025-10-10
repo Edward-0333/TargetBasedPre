@@ -14,7 +14,9 @@
 import os
 from itertools import permutations
 from itertools import product
-from typing import Callable, Dict, List, Optional, Tuple, Union
+from typing import Callable, Dict, List, Optional, Tuple, Union, Any
+from collections.abc import Sequence
+import os.path as osp
 
 import numpy as np
 import pandas as pd
@@ -55,6 +57,8 @@ class ArgoverseV1Dataset(Dataset):
 
     def process(self) -> None:
         am = ArgoverseMap()
+        for raw_path in tqdm(self.raw_paths):
+            kwargs = process_argoverse(self._split, raw_path, am, self._local_radius)
         print('处理数据')
 
     @property
@@ -77,12 +81,25 @@ class ArgoverseV1Dataset(Dataset):
     def processed_paths(self) -> List[str]:
         return self._processed_paths
 
+    @property
+    def raw_paths(self) -> List[str]:
+        r"""The filepaths to find in order to skip the download."""
+        files = to_list(self.raw_file_names)
+        return [osp.join(self.raw_dir, f) for f in files]
+
+
     def __len__(self) -> int:
         return len(self._raw_file_names)
 
     def __getitem__(self, idx):
         return torch.load(self.processed_paths[idx])
 
+
+def to_list(value: Any) -> Sequence:
+    if isinstance(value, Sequence) and not isinstance(value, str):
+        return value
+    else:
+        return [value]
 
 def process_argoverse(split: str,
                       raw_path: str,
@@ -104,97 +121,55 @@ def process_argoverse(split: str,
     agent_index = actor_ids.index(agent_df[0]['TRACK_ID'])
     city = df['CITY_NAME'].values[0]
 
-    # make the scene centered at AV
-    origin = torch.tensor([av_df[19]['X'], av_df[19]['Y']], dtype=torch.float)
-    av_heading_vector = origin - torch.tensor([av_df[18]['X'], av_df[18]['Y']], dtype=torch.float)
-    theta = torch.atan2(av_heading_vector[1], av_heading_vector[0])
-    rotate_mat = torch.tensor([[torch.cos(theta), -torch.sin(theta)],
-                               [torch.sin(theta), torch.cos(theta)]])
+    ego_cur_state = av_df[19][['X', 'Y']].values
 
-    # initialization
-    x = torch.zeros(num_nodes, 50, 2, dtype=torch.float)
-    edge_index = torch.LongTensor(list(permutations(range(num_nodes), 2))).t().contiguous()
-    test_edge_index = edge_index.numpy()
-    padding_mask = torch.ones(num_nodes, 50, dtype=torch.bool)
-    bos_mask = torch.zeros(num_nodes, 20, dtype=torch.bool)
-    rotate_angles = torch.zeros(num_nodes, dtype=torch.float)
+    past_ego_traj = av_df[:20][['X', 'Y']].values
 
-    for actor_id, actor_df in df.groupby('TRACK_ID'):
-        node_idx = actor_ids.index(actor_id)
-        node_steps = [timestamps.index(timestamp) for timestamp in actor_df['TIMESTAMP']]
-        padding_mask[node_idx, node_steps] = False
-        test_padding_maks = padding_mask.numpy()
-        if padding_mask[node_idx, 19]:  # make no predictions for actors that are unseen at the current time step
-            padding_mask[node_idx, 20:] = True
-        xy = torch.from_numpy(np.stack([actor_df['X'].values, actor_df['Y'].values], axis=-1)).float()
-        x[node_idx, node_steps] = torch.matmul(xy - origin, rotate_mat)
-        node_historical_steps = list(filter(lambda node_step: node_step < 20, node_steps))
-        if len(node_historical_steps) > 1:  # calculate the heading of the actor (approximately)
-            ccc = x[node_idx, node_historical_steps[-1]]
-            ddd = x[node_idx, node_historical_steps[-2]]
-            heading_vector = x[node_idx, node_historical_steps[-1]] - x[node_idx, node_historical_steps[-2]]
-            aaaa = torch.atan2(heading_vector[1], heading_vector[0])
-            rotate_angles[node_idx] = torch.atan2(heading_vector[1], heading_vector[0])
-        else:  # make no predictions for the actor if the number of valid time steps is less than 2
-            padding_mask[node_idx, 20:] = True
-    test_padding_maks = padding_mask.numpy()
-    test_rotate_angles = rotate_angles.numpy()
-    test_x = x.numpy()
-    # bos_mask is True if time step t is valid and time step t-1 is invalid
-    bos_mask[:, 0] = ~padding_mask[:, 0]
-    test_bos_mask1 = bos_mask.numpy()
+    future_ego_traj = av_df[20:][['X', 'Y']].values
+    timestamp_dfs = []
+    for timestamp in timestamps:
+        timestamp_df = df[df['TIMESTAMP'] == timestamp]
+        # 去掉OBJECT_TYPE为AV的行
+        timestamp_df = timestamp_df[timestamp_df['OBJECT_TYPE'] != 'AV']
+        timestamp_dfs.append(timestamp_df)
+    build_feature(am, av_df.obj, timestamp_dfs, 20)
 
-    bos_mask[:, 1: 20] = padding_mask[:, : 19] & ~padding_mask[:, 1: 20]
-    test_bos_mask2 = bos_mask.numpy()
-    positions = x.clone()
-    x[:, 20:] = torch.where((padding_mask[:, 19].unsqueeze(-1) | padding_mask[:, 20:]).unsqueeze(-1),
-                            torch.zeros(num_nodes, 30, 2),
-                            x[:, 20:] - x[:, 19].unsqueeze(-2))
-    test_x1 = x[1].numpy()
-    test_x2 = x[2].numpy()
-    ccccccc = (padding_mask[:, 19].unsqueeze(-1) | padding_mask[:, 20:]).numpy()
+    return {}
 
-    # test_x24 = x[24].numpy().copy()
-    x[:, 1: 20] = torch.where((padding_mask[:, : 19] | padding_mask[:, 1: 20]).unsqueeze(-1),
-                              torch.zeros(num_nodes, 19, 2),
-                              x[:, 1: 20] - x[:, : 19])
-    # test_x24_ = x[24].numpy()
+def get_agent_features(am, agent_df_list, present_idx):
+    present_agent_df = agent_df_list[present_idx]
+    N, T = len(present_agent_df), len(agent_df_list)
+    position = np.zeros((N, T, 2), dtype=np.float64)
+    valid_mask = np.zeros((N, T), dtype=np.bool_)
 
-    x[:, 0] = torch.zeros(num_nodes, 2)
+    if N == 0:
+        return (
+            {
+                "position": position,
+            },
+            [],
+            [],
+        )
+    agent_id = present_agent_df['TRACK_ID'].values
+    city = present_agent_df['CITY_NAME'].values[0]
+    for t, agent_df in enumerate(agent_df_list):
+        agent_id_to_idx = {agent_id: i for i, agent_id in enumerate(agent_df['TRACK_ID'].values)}
+        for i, aid in enumerate(agent_id):
+            if aid in agent_id_to_idx:
+                temp_position = agent_df.iloc[agent_id_to_idx[aid]][['X', 'Y']].values
+                position[i, t] = temp_position
+                test = am.get_lane_ids_in_xy_bbox(temp_position[0], temp_position[1], city, 5)
+                lane, conf, cl = am.get_nearest_centerline(np.array([temp_position[0], temp_position[1]]), city, visualize=False)
 
-    # get lane features at the current time step
-    df_19 = df[df['TIMESTAMP'] == timestamps[19]]
-    node_inds_19 = [actor_ids.index(actor_id) for actor_id in df_19['TRACK_ID']]
-    node_positions_19 = torch.from_numpy(np.stack([df_19['X'].values, df_19['Y'].values], axis=-1)).float()
-    (lane_vectors, is_intersections, turn_directions, traffic_controls, lane_actor_index,
-     lane_actor_vectors) = get_lane_features(am, node_inds_19, node_positions_19, origin, rotate_mat, city, radius)
+                valid_mask[i, t] = True
+    print(1)
+    pass
 
-    y = None if split == 'test' else x[:, 20:]
-    seq_id = os.path.splitext(os.path.basename(raw_path))[0]
+def build_feature(am, av_df, timestamp_dfs, present_idx):
+    ego_cur_state = av_df.iloc[present_idx][['X', 'Y']].values
 
-    return {
-        'x': x[:, : 20],  # [N, 20, 2]
-        'positions': positions,  # [N, 50, 2]
-        'edge_index': edge_index,  # [2, N x N - 1]
-        'y': y,  # [N, 30, 2]
-        'num_nodes': num_nodes,
-        'padding_mask': padding_mask,  # [N, 50]
-        'bos_mask': bos_mask,  # [N, 20]
-        'rotate_angles': rotate_angles,  # [N]
-        'lane_vectors': lane_vectors,  # [L, 2]
-        'is_intersections': is_intersections,  # [L]
-        'turn_directions': turn_directions,  # [L]
-        'traffic_controls': traffic_controls,  # [L]
-        'lane_actor_index': lane_actor_index,  # [2, E_{A-L}]
-        'lane_actor_vectors': lane_actor_vectors,  # [E_{A-L}, 2]
-        'seq_id': int(seq_id),
-        'av_index': av_index,
-        'agent_index': agent_index,
-        'city': city,
-        'origin': origin.unsqueeze(0),
-        'theta': theta,
-    }
-
+    get_agent_features(am, timestamp_dfs, present_idx)
+    pass
 
 def get_lane_features(am: ArgoverseMap,
                       node_inds: List[int],

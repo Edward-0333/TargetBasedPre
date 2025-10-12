@@ -1,2 +1,3 @@
 datasets/train/*
 datasets/val/*
+lightning_logs/*

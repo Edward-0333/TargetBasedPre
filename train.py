@@ -24,8 +24,8 @@ if __name__ == '__main__':
 
     parser = ArgumentParser()
     parser.add_argument('--root', type=str, default='./datasets')
-    parser.add_argument('--train_batch_size', type=int, default=1)
-    parser.add_argument('--val_batch_size', type=int, default=1)
+    parser.add_argument('--train_batch_size', type=int, default=2)
+    parser.add_argument('--val_batch_size', type=int, default=2)
     parser.add_argument('--shuffle', type=bool, default=True)
     parser.add_argument('--num_workers', type=int, default=8)
     parser.add_argument('--pin_memory', type=bool, default=True)

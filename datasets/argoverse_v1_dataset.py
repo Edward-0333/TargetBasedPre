@@ -67,9 +67,11 @@ class ArgoverseV1Dataset(Dataset):
             kwargs = process_argoverse(self._split, raw_path, am, self._local_radius)
             idx = os.path.splitext(os.path.basename(raw_path))[0]
             processed_path = os.path.join(self.processed_dir, f'{idx}.pt')
-            with open(processed_path, 'wb') as f:
-                pickle.dump(kwargs, f, protocol=pickle.HIGHEST_PROTOCOL)
+            torch.save(kwargs, processed_path)
 
+            # with open(processed_path, 'wb') as f:
+            #     pickle.dump(kwargs, f, protocol=pickle.HIGHEST_PROTOCOL)
+        print(1)
     @property
     def raw_dir(self) -> str:
         return os.path.join(self.root, self._directory, 'data')
@@ -101,8 +103,10 @@ class ArgoverseV1Dataset(Dataset):
         return len(self._raw_file_names)
 
     def __getitem__(self, idx):
-        with open(self.processed_paths[idx], 'rb') as f:
-            return pickle.load(f)
+        # with open(self.processed_paths[idx], 'rb') as f:
+        #     return pickle.load(f)
+        return torch.load(self.processed_paths[idx])
+
 
 
 def to_list(value: Any) -> Sequence:
@@ -140,7 +144,7 @@ def process_argoverse(split: str,
     for timestamp in timestamps:
         timestamp_df = df[df['TIMESTAMP'] == timestamp]
         # 去掉OBJECT_TYPE为AV的行
-        timestamp_df = timestamp_df[timestamp_df['OBJECT_TYPE'] != 'AV']
+        # timestamp_df = timestamp_df[timestamp_df['OBJECT_TYPE'] != 'AV']
         timestamp_dfs.append(timestamp_df)
     data = build_feature(am, av_df.obj, timestamp_dfs, 20, radius)
 
@@ -173,10 +177,10 @@ def get_agent_features(am, agent_df_list, present_idx):
                 # test = am.get_lane_ids_in_xy_bbox(temp_position[0], temp_position[1], city, 5)
                 lane, conf, cl = am.get_nearest_centerline(np.array([temp_position[0], temp_position[1]]), city, visualize=False)
                 assert lane is not None, "lane is None"
-                if conf < 0.5:
-                    lane_id[idx, t] = -1
-                else:
-                    lane_id[idx, t] = int(lane.id)
+                # if conf < 0.5:
+                #     lane_id[idx, t] = -1
+                # else:
+                lane_id[idx, t] = int(lane.id)
                 # if lane.id == 9626043:
                 #     print(1)
 
@@ -240,6 +244,9 @@ def get_map_features(am, agent_df_list, present_idx, radius, sample_points=20):
     }
     return map_features
 
+def get_ego_feature(am, av_df, present_idx):
+    pass
+
 def normalize(data, av_df, present_idx):
     ego_cur_state = av_df.iloc[present_idx][['X', 'Y']].values
     ego_pre_state = av_df.iloc[present_idx - 1][['X', 'Y']].values
@@ -250,10 +257,10 @@ def normalize(data, av_df, present_idx):
                           dtype=np.float64)
 
     data["map"]['point_position_raw'] = np.matmul(data["map"]['point_position_raw'] - ego_cur_state, rotate_mat)
-    data['map']['point_position'] = np.matmul(data["map"]['point_position'] - ego_cur_state, rotate_mat)
-    data['map']['point_vector'] = np.matmul(data["map"]['point_vector'], rotate_mat)
+    data['map']['point_position'] = np.array(np.matmul(data["map"]['point_position'] - ego_cur_state, rotate_mat),dtype=np.float64)
+    data['map']['point_vector'] = np.array(np.matmul(data["map"]['point_vector'], rotate_mat),dtype=np.float64)
     data["ego_cur_state"] = np.array([0.0, 0.0])
-    data['agent']['position'] = np.matmul(data['agent']['position'] - ego_cur_state, rotate_mat)
+    data['agent']['position'] = np.array(np.matmul(data['agent']['position'] - ego_cur_state, rotate_mat),dtype=np.float64)
 
     return data
 
@@ -263,14 +270,62 @@ def build_feature(am, av_df, timestamp_dfs, present_idx, radius):
 
     agent_features = get_agent_features(am, timestamp_dfs, present_idx)
     map_features = get_map_features(am, timestamp_dfs, present_idx, radius)
+    # find_candidate_lanes(am, agent_features, map_features, timestamp_dfs)
+    agent_features['agent_lane_id_target'] = target_to_idx(agent_features, map_features)
     data["map"] = map_features
     data["ego_cur_state"] = ego_cur_state
     data["agent"] = agent_features
     data = normalize(data, av_df, present_idx)
-
+    new_data = np_to_torch(data)
     print(1)
-    return data
+    return new_data
 
+def np_to_torch(data):
+    new_data = {}
+    map_feature = {}
+    map_feature['point_position'] = torch.from_numpy(data['map']['point_position'])
+    map_feature['point_vector'] = torch.from_numpy(data['map']['point_vector'])
+    map_feature['lane_type'] = torch.from_numpy(data['map']['lane_type'])
+    map_feature['lane_direction'] = torch.from_numpy(data['map']['lane_direction'])
+    map_feature['lane_control'] = torch.from_numpy(data['map']['lane_control'])
+    new_data['map'] = map_feature
+    agent_features = {}
+    agent_features['position'] = torch.from_numpy(data['agent']['position'])
+    agent_features['valid_mask'] = torch.from_numpy(data['agent']['valid_mask'])
+    agent_features['agent_lane_id_target'] = torch.from_numpy(data['agent']['agent_lane_id_target'])
+    new_data['agent'] = agent_features
+    return new_data
+
+
+def target_to_idx(agent_features, map_features):
+    all_lane_id = map_features["lane_ids"]
+    dict_all_lane_id = {int(lid): idx for idx, lid in enumerate(all_lane_id) if int(lid) > 0}
+    agent_lane_id_target = np.zeros_like(agent_features["lane_id"])
+    N, T = agent_features["lane_id"].shape
+    for i in range(N):
+        for t in range(T):
+            lid = agent_features["lane_id"][i, t]
+            if lid in dict_all_lane_id:
+                agent_lane_id_target[i, t] = dict_all_lane_id[lid]
+            else:
+                agent_lane_id_target[i, t] = -1
+    return agent_lane_id_target
+
+def find_candidate_lanes(am: ArgoverseMap,agent_features: Dict, map_features: Dict, timestamp_dfs):
+    # 好像不需要mask，因为在测试时也没有mask
+    city_name = timestamp_dfs[0].iloc[0]['CITY_NAME']
+    all_lane_id = map_features["lane_ids"]
+    dict_all_lane_id = {int(lid): idx for idx, lid in enumerate(all_lane_id) if int(lid) > 0}
+    # cand_mask: [N, T, K] - 候选车道有效的 mask (1:有效，0:无效)。
+    K = 256
+    N = agent_features['position'].shape[0]
+    T = agent_features['position'].shape[1]# [:,hist_steps:].shape[1]
+    cand_mask = np.zeros((N, T, K), dtype=bool)
+    for i in range(N):
+        for t in range(T):
+            now_id = agent_features['lane_id'][i, t]
+            adjacent_ids = am.get_lane_segment_adjacent_ids(now_id, city_name)
+            pass
 
 def get_lane_features(am: ArgoverseMap,
                       node_inds: List[int],

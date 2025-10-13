@@ -15,8 +15,25 @@ from typing import Callable, Optional
 
 from pytorch_lightning import LightningDataModule
 from torch.utils.data import DataLoader
+from torch.nn.utils.rnn import pad_sequence
 
 from datasets import ArgoverseV1Dataset
+
+
+def collate_fn(batch):
+    pad_keys = ["agent", "map"]
+
+    batch_data = {}
+    for key in pad_keys:
+        batch_data[key] = {
+            k: pad_sequence(
+                [f[key][k] for f in batch], batch_first=True
+            )
+            for k in batch[0][key].keys()
+        }
+
+    print(1)
+    return batch
 
 
 class ArgoverseV1DataModule(LightningDataModule):
@@ -54,9 +71,8 @@ class ArgoverseV1DataModule(LightningDataModule):
 
     def train_dataloader(self):
         return DataLoader(self.train_dataset, batch_size=self.train_batch_size, shuffle=self.shuffle,
-                          num_workers=self.num_workers, pin_memory=self.pin_memory,
-                          persistent_workers=self.persistent_workers)
+                          num_workers=self.num_workers, collate_fn=collate_fn)
 
     def val_dataloader(self):
-        return DataLoader(self.val_dataset, batch_size=self.val_batch_size, shuffle=False, num_workers=self.num_workers,
-                          pin_memory=self.pin_memory, persistent_workers=self.persistent_workers)
+        return DataLoader(self.val_dataset, batch_size=self.val_batch_size, shuffle=False,
+                          num_workers=self.num_workers, collate_fn=collate_fn)

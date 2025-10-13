@@ -2,8 +2,9 @@ import pytorch_lightning as pl
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-
-
+from metrics import ADE
+from metrics import FDE
+from metrics import MR
 class TB(pl.LightningModule):
     def __init__(self,
                  historical_steps: int,
@@ -24,6 +25,20 @@ class TB(pl.LightningModule):
                  T_max: int,
                  **kwargs):
         super(TB, self).__init__()
+        self.save_hyperparameters()
+        self.historical_steps = historical_steps
+        self.future_steps = future_steps
+        self.num_modes = num_modes
+        self.rotate = rotate
+        self.parallel = parallel
+        self.lr = lr
+        self.weight_decay = weight_decay
+        self.T_max = T_max
+        self.local_encoder = nn.Parameter()
+
+        self.minADE = ADE()
+        self.minFDE = FDE()
+        self.minMR = MR()
     def forward(self,data):
         pass
     def training_step(self, batch, batch_idx):
@@ -32,7 +47,8 @@ class TB(pl.LightningModule):
         pass
 
     def configure_optimizers(self):
-        pass
+        optimizer = torch.optim.AdamW(self.parameters(), lr=self.lr, weight_decay=1e-2)
+        return optimizer
 
     @staticmethod
     def add_model_specific_args(parent_parser):

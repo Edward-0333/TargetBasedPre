@@ -1,3 +1,4 @@
 datasets/train/*
 datasets/val/*
+datasets/plot_test/*
 lightning_logs/*

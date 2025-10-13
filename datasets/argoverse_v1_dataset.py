@@ -61,6 +61,9 @@ class ArgoverseV1Dataset(Dataset):
         os.makedirs(self.processed_dir, exist_ok=True)
         am = ArgoverseMap()
         for raw_path in tqdm(self.raw_paths):
+            # aaa = raw_path.split('/')[-1]
+            # if raw_path.split('/')[-1] != '3828.csv':
+            #     continue
             kwargs = process_argoverse(self._split, raw_path, am, self._local_radius)
             idx = os.path.splitext(os.path.basename(raw_path))[0]
             processed_path = os.path.join(self.processed_dir, f'{idx}.pt')
@@ -158,18 +161,27 @@ def get_agent_features(am, agent_df_list, present_idx):
         )
     agent_id = present_agent_df['TRACK_ID'].values
     city = present_agent_df['CITY_NAME'].values[0]
+    agent_id_to_idx = {agent_id: i for i, agent_id in enumerate(present_agent_df['TRACK_ID'].values)}
+
     for t, agent_df in enumerate(agent_df_list):
-        agent_id_to_idx = {agent_id: i for i, agent_id in enumerate(agent_df['TRACK_ID'].values)}
-        for i, aid in enumerate(agent_id):
+        agent_id_temp = agent_df['TRACK_ID'].values
+        for _, aid in enumerate(agent_id_temp):  # i不对!！!
             if aid in agent_id_to_idx:
-                temp_position = agent_df.iloc[agent_id_to_idx[aid]][['X', 'Y']].values
-                position[i, t] = temp_position
-                test = am.get_lane_ids_in_xy_bbox(temp_position[0], temp_position[1], city, 5)
+                idx = agent_id_to_idx[aid]
+                temp_position = agent_df[agent_df['TRACK_ID'] == aid][['X', 'Y']].values[0]
+                position[idx, t] = temp_position
+                # test = am.get_lane_ids_in_xy_bbox(temp_position[0], temp_position[1], city, 5)
                 lane, conf, cl = am.get_nearest_centerline(np.array([temp_position[0], temp_position[1]]), city, visualize=False)
                 assert lane is not None, "lane is None"
-                lane_id[i, t] = int(lane.id)
+                if conf < 0.5:
+                    lane_id[idx, t] = -1
+                else:
+                    lane_id[idx, t] = int(lane.id)
+                # if lane.id == 9626043:
+                #     print(1)
 
-                valid_mask[i, t] = True
+
+                valid_mask[idx, t] = True
 
     agent_features = {
         "position": position,
@@ -224,6 +236,7 @@ def get_map_features(am, agent_df_list, present_idx, radius, sample_points=20):
         "lane_type": lane_type,
         "lane_direction": lane_direction,
         "lane_control": lane_control,
+        "lane_ids": list(lane_ids),
     }
     return map_features
 

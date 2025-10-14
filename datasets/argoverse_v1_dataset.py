@@ -209,6 +209,8 @@ def get_map_features(am, agent_df_list, present_idx, radius, sample_points=20):
     lane_type = np.zeros((M,), dtype=np.int64)
     lane_direction = np.zeros((M,), dtype=np.float64)
     lane_control = np.zeros((M,), dtype=np.int64)
+    valid_mask = np.ones((M, P), dtype=np.bool_)
+    lane_center = np.zeros((M, 2), dtype=np.float64)
     for lane_id in lane_ids:
         idx = list(lane_ids).index(lane_id)
         centerline_point = am.get_lane_segment_centerline(lane_id, city)[:, : 2]
@@ -232,6 +234,7 @@ def get_map_features(am, agent_df_list, present_idx, radius, sample_points=20):
         lane_type[idx] = int(is_intersection)
         lane_direction[idx] = turn_direction
         lane_control[idx] = int(traffic_control)
+        lane_center[idx] =  centerline_point[int(sample_points / 2)]
 
     map_features = {
         "point_position_raw": point_position_raw,
@@ -241,6 +244,8 @@ def get_map_features(am, agent_df_list, present_idx, radius, sample_points=20):
         "lane_direction": lane_direction,
         "lane_control": lane_control,
         "lane_ids": list(lane_ids),
+        "valid_mask": valid_mask,
+        "lane_center": lane_center,
     }
     return map_features
 
@@ -283,16 +288,18 @@ def build_feature(am, av_df, timestamp_dfs, present_idx, radius):
 def np_to_torch(data):
     new_data = {}
     map_feature = {}
-    map_feature['point_position'] = torch.from_numpy(data['map']['point_position'])
-    map_feature['point_vector'] = torch.from_numpy(data['map']['point_vector'])
-    map_feature['lane_type'] = torch.from_numpy(data['map']['lane_type'])
-    map_feature['lane_direction'] = torch.from_numpy(data['map']['lane_direction'])
+    map_feature['point_position'] = torch.from_numpy(data['map']['point_position']).float()
+    map_feature['point_vector'] = torch.from_numpy(data['map']['point_vector']).float()
+    map_feature['lane_type'] = torch.from_numpy(data['map']['lane_type']).float()
+    map_feature['lane_direction'] = torch.from_numpy(data['map']['lane_direction']).float()
     map_feature['lane_control'] = torch.from_numpy(data['map']['lane_control'])
+    map_feature['valid_mask'] = torch.from_numpy(data['map']['valid_mask'])
+    map_feature['lane_center'] = torch.from_numpy(data['map']['lane_center']).float()
     new_data['map'] = map_feature
     agent_features = {}
-    agent_features['position'] = torch.from_numpy(data['agent']['position'])
+    agent_features['position'] = torch.from_numpy(data['agent']['position']).float()
     agent_features['valid_mask'] = torch.from_numpy(data['agent']['valid_mask'])
-    agent_features['agent_lane_id_target'] = torch.from_numpy(data['agent']['agent_lane_id_target'])
+    agent_features['agent_lane_id_target'] = torch.from_numpy(data['agent']['agent_lane_id_target']).float()
     new_data['agent'] = agent_features
     return new_data
 

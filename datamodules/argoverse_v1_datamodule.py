@@ -33,7 +33,7 @@ def collate_fn(batch):
         }
 
     print(1)
-    return batch
+    return batch_data
 
 
 class ArgoverseV1DataModule(LightningDataModule):

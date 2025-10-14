@@ -7,7 +7,7 @@ from metrics import FDE
 from metrics import MR
 from models import AgentEncoder
 from models import MapEncoder
-
+from models import LinearScorerLayer
 
 class TB(pl.LightningModule):
     def __init__(self,
@@ -66,14 +66,12 @@ class TB(pl.LightningModule):
             polygon_channel=polygon_channel,
             use_lane_boundary=True,
         )
+        self.linear_scorer_layer = LinearScorerLayer(T=30, d=256)
+
         self.minADE = ADE()
         self.minFDE = FDE()
         self.minMR = MR()
     def forward(self,data):
-        pass
-    def training_step(self, batch, batch_idx):
-        pass
-    def validation_step(self, data, batch_idx):
         agent_pos = data['agent']['position'][:, :, : self.historical_steps]
         bs, A = agent_pos.shape[0:2]
         x_agent = self.agent_encoder(data)
@@ -81,6 +79,58 @@ class TB(pl.LightningModule):
 
         agent_mask = data['agent']['valid_mask'][:, :, : self.historical_steps]
         agent_key_padding = ~(agent_mask.any(-1))
+
+        polygon_mask = data["map"]["valid_mask"]
+        map_key_padding = ~polygon_mask.any(-1)
+
+        logits, probs = self.linear_scorer_layer(
+            x_agent,
+            x_polygon,
+            agent_mask=agent_key_padding,
+            lane_mask=map_key_padding,
+        )
+
+        return logits, probs
+    def training_step(self, data, batch_idx):
+        logits, probs  = self(data)
+        target_lane_id = data['agent']['agent_lane_id_target'][:,:,self.historical_steps-1:].long()
+        agent_mask = data['agent']['valid_mask'][:,:,self.historical_steps-1:]
+        # 如果agent_mask为False，则对应的target_lane_id设为-100
+        ignore_index = -100
+        target_lane_id = target_lane_id.masked_fill(~agent_mask, ignore_index)
+        # test1 = target_lane_id.cpu().numpy()
+        B, N, T, K = probs.shape
+        loss = F.cross_entropy(
+            probs.view(-1, K),
+            target_lane_id.view(-1),
+            reduction='none',
+            ignore_index=ignore_index
+        ).view(B, N, T)
+        valid = torch.ones_like(loss, dtype=torch.float, device=loss.device)
+        if agent_mask is not None:
+            valid = valid * agent_mask.float()
+        loss = (loss * valid).sum() / valid.sum()
+
+
+    def validation_step(self, data, batch_idx):
+        logits, probs  = self(data)
+        target_lane_id = data['agent']['agent_lane_id_target'][:,:,self.historical_steps-1:].long()
+        agent_mask = data['agent']['valid_mask'][:,:,self.historical_steps-1:]
+        # 如果agent_mask为False，则对应的target_lane_id设为-100
+        ignore_index = -100
+        target_lane_id = target_lane_id.masked_fill(~agent_mask, ignore_index)
+        # test1 = target_lane_id.cpu().numpy()
+        B, N, T, K = probs.shape
+        loss = F.cross_entropy(
+            probs.view(-1, K),
+            target_lane_id.view(-1),
+            reduction='none',
+            ignore_index=ignore_index
+        ).view(B, N, T)
+        valid = torch.ones_like(loss, dtype=torch.float, device=loss.device)
+        if agent_mask is not None:
+            valid = valid * agent_mask.float()
+        loss = (loss * valid).sum() / valid.sum()
 
         print(1)
 

@@ -299,7 +299,7 @@ def np_to_torch(data):
     agent_features = {}
     agent_features['position'] = torch.from_numpy(data['agent']['position']).float()
     agent_features['valid_mask'] = torch.from_numpy(data['agent']['valid_mask'])
-    agent_features['agent_lane_id_target'] = torch.from_numpy(data['agent']['agent_lane_id_target']).float()
+    agent_features['agent_lane_id_target'] = torch.from_numpy(data['agent']['agent_lane_id_target']).int()
     new_data['agent'] = agent_features
     return new_data
 

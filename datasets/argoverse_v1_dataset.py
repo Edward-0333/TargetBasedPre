@@ -71,7 +71,7 @@ class ArgoverseV1Dataset(Dataset):
 
             # with open(processed_path, 'wb') as f:
             #     pickle.dump(kwargs, f, protocol=pickle.HIGHEST_PROTOCOL)
-        print(1)
+        # print(1)
     @property
     def raw_dir(self) -> str:
         return os.path.join(self.root, self._directory, 'data')
@@ -282,7 +282,7 @@ def build_feature(am, av_df, timestamp_dfs, present_idx, radius):
     data["agent"] = agent_features
     data = normalize(data, av_df, present_idx)
     new_data = np_to_torch(data)
-    print(1)
+    # print(1)
     return new_data
 
 def np_to_torch(data):

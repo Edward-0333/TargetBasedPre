@@ -110,6 +110,7 @@ class TB(pl.LightningModule):
         if agent_mask is not None:
             valid = valid * agent_mask.float()
         loss = (loss * valid).sum() / valid.sum()
+        return loss
 
 
     def validation_step(self, data, batch_idx):
@@ -132,11 +133,42 @@ class TB(pl.LightningModule):
             valid = valid * agent_mask.float()
         loss = (loss * valid).sum() / valid.sum()
 
-        print(1)
 
     def configure_optimizers(self):
-        optimizer = torch.optim.AdamW(self.parameters(), lr=self.lr, weight_decay=1e-2)
-        return optimizer
+        # optimizer = torch.optim.AdamW(self.parameters(), lr=self.lr, weight_decay=1e-2)
+        # return optimizer
+        decay = set()
+        no_decay = set()
+        whitelist_weight_modules = (nn.Linear, nn.Conv1d, nn.Conv2d, nn.Conv3d, nn.MultiheadAttention, nn.LSTM, nn.GRU)
+        blacklist_weight_modules = (nn.BatchNorm1d, nn.BatchNorm2d, nn.BatchNorm3d, nn.LayerNorm, nn.Embedding)
+        for module_name, module in self.named_modules():
+            for param_name, param in module.named_parameters():
+                full_param_name = '%s.%s' % (module_name, param_name) if module_name else param_name
+                if 'bias' in param_name:
+                    no_decay.add(full_param_name)
+                elif 'weight' in param_name:
+                    if isinstance(module, whitelist_weight_modules):
+                        decay.add(full_param_name)
+                    elif isinstance(module, blacklist_weight_modules):
+                        no_decay.add(full_param_name)
+                elif not ('weight' in param_name or 'bias' in param_name):
+                    no_decay.add(full_param_name)
+        param_dict = {param_name: param for param_name, param in self.named_parameters()}
+        inter_params = decay & no_decay
+        union_params = decay | no_decay
+        assert len(inter_params) == 0
+        assert len(param_dict.keys() - union_params) == 0
+
+        optim_groups = [
+            {"params": [param_dict[param_name] for param_name in sorted(list(decay))],
+             "weight_decay": self.weight_decay},
+            {"params": [param_dict[param_name] for param_name in sorted(list(no_decay))],
+             "weight_decay": 0.0},
+        ]
+
+        optimizer = torch.optim.AdamW(optim_groups, lr=self.lr, weight_decay=self.weight_decay)
+        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer=optimizer, T_max=self.T_max, eta_min=0.0)
+        return [optimizer], [scheduler]
 
     @staticmethod
     def add_model_specific_args(parent_parser):

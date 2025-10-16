@@ -32,7 +32,7 @@ def collate_fn(batch):
             for k in batch[0][key].keys()
         }
 
-    print(1)
+    # print(1)
     return batch_data
 
 

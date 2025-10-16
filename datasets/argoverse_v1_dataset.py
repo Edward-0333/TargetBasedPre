@@ -59,14 +59,23 @@ class ArgoverseV1Dataset(Dataset):
 
     def process(self) -> None:
         os.makedirs(self.processed_dir, exist_ok=True)
+        # Collect raw/processed path pairs that still need work so we avoid re-processing.
+        to_process = []
+        for raw_path in self.raw_paths:
+            idx = os.path.splitext(os.path.basename(raw_path))[0]
+            processed_path = os.path.join(self.processed_dir, f'{idx}.pt')
+            if not os.path.exists(processed_path):
+                to_process.append((raw_path, processed_path))
+
+        if not to_process:
+            return
+
         am = ArgoverseMap()
-        for raw_path in tqdm(self.raw_paths):
+        for raw_path, processed_path in tqdm(to_process):
             # aaa = raw_path.split('/')[-1]
             # if raw_path.split('/')[-1] != '3828.csv':
             #     continue
             kwargs = process_argoverse(self._split, raw_path, am, self._local_radius)
-            idx = os.path.splitext(os.path.basename(raw_path))[0]
-            processed_path = os.path.join(self.processed_dir, f'{idx}.pt')
             torch.save(kwargs, processed_path)
 
             # with open(processed_path, 'wb') as f:

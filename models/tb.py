@@ -142,6 +142,19 @@ class TB(pl.LightningModule):
         self.log('val_loss', loss, on_step=False, on_epoch=True, prog_bar=True, batch_size=batch_size)
         return loss
 
+    def on_after_backward(self):
+        # Monitor gradient norm to catch exploding/vanishing gradients early.
+        grads = [
+            param.grad.detach()
+            for param in self.parameters()
+            if param.grad is not None
+        ]
+        if not grads:
+            return
+        total_norm = torch.linalg.vector_norm(
+            torch.stack([g.norm(2) for g in grads]), ord=2
+        )
+        self.log('grad_norm_l2', total_norm, on_step=True, prog_bar=False, logger=True)
 
     def configure_optimizers(self):
         # optimizer = torch.optim.AdamW(self.parameters(), lr=self.lr, weight_decay=1e-2)

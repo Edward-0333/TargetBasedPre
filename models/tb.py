@@ -98,6 +98,8 @@ class TB(pl.LightningModule):
         # 如果agent_mask为False，则对应的target_lane_id设为-100
         ignore_index = -100
         target_lane_id = target_lane_id.masked_fill(~agent_mask, ignore_index)
+        # 将target_lane_id中为-1的值也设为-100
+        target_lane_id = target_lane_id.masked_fill(target_lane_id == -1, ignore_index)
         # test1 = target_lane_id.cpu().numpy()
         B, N, T, K = probs.shape
         loss = F.cross_entropy(
@@ -120,6 +122,8 @@ class TB(pl.LightningModule):
         # 如果agent_mask为False，则对应的target_lane_id设为-100
         ignore_index = -100
         target_lane_id = target_lane_id.masked_fill(~agent_mask, ignore_index)
+        # 将target_lane_id中为-1的值也设为-100
+        target_lane_id = target_lane_id.masked_fill(target_lane_id == -1, ignore_index)
         # test1 = target_lane_id.cpu().numpy()
         B, N, T, K = probs.shape
         loss = F.cross_entropy(

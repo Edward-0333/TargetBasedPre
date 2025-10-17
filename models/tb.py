@@ -103,7 +103,7 @@ class TB(pl.LightningModule):
         # test1 = target_lane_id.cpu().numpy()
         B, N, T, K = probs.shape
         loss = F.cross_entropy(
-            probs.view(-1, K),
+            logits.view(-1, K),
             target_lane_id.view(-1),
             reduction='none',
             ignore_index=ignore_index
@@ -129,7 +129,7 @@ class TB(pl.LightningModule):
         # test1 = target_lane_id.cpu().numpy()
         B, N, T, K = probs.shape
         loss = F.cross_entropy(
-            probs.view(-1, K),
+            logits.view(-1, K),
             target_lane_id.view(-1),
             reduction='none',
             ignore_index=ignore_index
@@ -206,7 +206,7 @@ class TB(pl.LightningModule):
         parser.add_argument('--num_global_layers', type=int, default=3)
         parser.add_argument('--local_radius', type=float, default=50)
         parser.add_argument('--parallel', type=bool, default=False)
-        parser.add_argument('--lr', type=float, default=5e-4)
+        parser.add_argument('--lr', type=float, default=0.0001)
         parser.add_argument('--weight_decay', type=float, default=1e-4)
         parser.add_argument('--T_max', type=int, default=64)
         return parent_parser

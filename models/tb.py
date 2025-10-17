@@ -112,6 +112,8 @@ class TB(pl.LightningModule):
         if agent_mask is not None:
             valid = valid * agent_mask.float()
         loss = (loss * valid).sum() / valid.sum()
+        batch_size = data['agent']['position'].size(0)
+        self.log('train_loss', loss, on_step=True, on_epoch=True, prog_bar=True, batch_size=batch_size)
         return loss
 
 
@@ -136,6 +138,9 @@ class TB(pl.LightningModule):
         if agent_mask is not None:
             valid = valid * agent_mask.float()
         loss = (loss * valid).sum() / valid.sum()
+        batch_size = data['agent']['position'].size(0)
+        self.log('val_loss', loss, on_step=False, on_epoch=True, prog_bar=True, batch_size=batch_size)
+        return loss
 
 
     def configure_optimizers(self):

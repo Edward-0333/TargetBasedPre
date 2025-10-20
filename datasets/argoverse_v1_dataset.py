@@ -273,6 +273,7 @@ def normalize(data, av_df, present_idx):
     data["map"]['point_position_raw'] = np.matmul(data["map"]['point_position_raw'] - ego_cur_state, rotate_mat)
     data['map']['point_position'] = np.array(np.matmul(data["map"]['point_position'] - ego_cur_state, rotate_mat),dtype=np.float64)
     data['map']['point_vector'] = np.array(np.matmul(data["map"]['point_vector'], rotate_mat),dtype=np.float64)
+    data['map']['lane_center'] = np.array(np.matmul(data["map"]['lane_center'] - ego_cur_state, rotate_mat),dtype=np.float64)
     data["ego_cur_state"] = np.array([0.0, 0.0])
     data['agent']['position'] = np.array(np.matmul(data['agent']['position'] - ego_cur_state, rotate_mat),dtype=np.float64)
 

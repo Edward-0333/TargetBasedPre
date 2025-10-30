@@ -45,7 +45,7 @@ class ArgoverseV1Dataset(Dataset):
         elif split == 'val':
             self._directory = 'val'
         elif split == 'test':
-            self._directory = 'test_obs'
+            self._directory = 'test'
         else:
             raise ValueError(split + ' is not valid')
         self.root = root

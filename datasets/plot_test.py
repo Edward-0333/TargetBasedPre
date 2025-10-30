@@ -3,8 +3,9 @@ from pathlib import Path
 import pickle
 
 
-def plot_test():
-    data_path = Path(__file__).resolve().parent / 'train' / 'processed' / '3828.pt'
+def plot_test(data_path=None,save_path=None):
+    if data_path is None:
+        data_path = Path(__file__).resolve().parent / 'train' / 'processed' / '3828.pt'
     with data_path.open('rb') as f:
         data = pickle.load(f)
 
@@ -50,13 +51,12 @@ def plot_test():
 
         ax.scatter(ego_cur_state[0], ego_cur_state[1], s=10, color='red', label='Ego')
 
-
         ax.set_aspect('equal', 'box')
         ax.set_xlabel('X')
         ax.set_ylabel('Y')
-        ax.set_title('Scene 2645')
+        ax.set_title('Scene')
         # 保存图片到plot_test目录
-        plt.savefig(Path(__file__).resolve().parent / 'plot_test' / f'scene_2645_t{t}.png', dpi=300)
+        plt.savefig(Path(__file__).resolve().parent / 'plot_test' / f'{t}.png', dpi=300)
         plt.close()
 
 

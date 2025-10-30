@@ -2,7 +2,7 @@ datasets/train/*
 datasets/val/*
 datasets/plot_test/*
 lightning_logs/*
-
+model_test_png/*
 # Python cache directories and bytecode
 __pycache__/
 *.py[cod]

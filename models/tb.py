@@ -8,6 +8,9 @@ from metrics import MR
 from models import AgentEncoder
 from models import MapEncoder
 from models import LinearScorerLayer
+from models import FourierEmbedding
+from models import TransformerEncoderLayer
+
 
 class TB(pl.LightningModule):
     def __init__(self,
@@ -67,24 +70,45 @@ class TB(pl.LightningModule):
             use_lane_boundary=True,
         )
         self.linear_scorer_layer = LinearScorerLayer(T=30, d=256)
+        self.pos_emb = FourierEmbedding(2, dim, 64)
+        self.encoder_blocks = nn.ModuleList(
+            TransformerEncoderLayer(dim=dim, num_heads=num_heads, drop_path=dp)
+            for dp in [x.item() for x in torch.linspace(0, drop_path, encoder_depth)]
+        )
+        self.norm = nn.LayerNorm(dim)
 
         self.minADE = ADE()
         self.minFDE = FDE()
         self.minMR = MR()
     def forward(self,data):
-        agent_pos = data['agent']['position'][:, :, : self.historical_steps]
+        agent_pos = data['agent']['position'][:, :, self.historical_steps]
+        lane_center = data['map']['lane_center']
+        pos = torch.cat((agent_pos, lane_center), dim=1)
         bs, A = agent_pos.shape[0:2]
+        # 分别计算agent和polygon的特征
         x_agent = self.agent_encoder(data)
         x_polygon = self.map_encoder(data)
+        pos_embed = self.pos_emb(pos)
+        # 合并agent和polygon的特征
+        x = torch.cat([x_agent, x_polygon], dim=1)
+        x = x + pos_embed
+        history_agent_mask = data["agent"]["valid_mask"][:, :, : self.historical_steps]
+        history_agent_key_padding = ~(history_agent_mask.any(-1))
+        polygon_mask = data["map"]["valid_mask"]
+        map_key_padding = ~polygon_mask.any(-1)
+        key_padding_mask = torch.cat([history_agent_key_padding, map_key_padding], dim=-1)
+        for blk in self.encoder_blocks:
+            x = blk(x, key_padding_mask=key_padding_mask, return_attn_weights=False)
+        x = self.norm(x)[:, :A, :]
 
-        agent_mask = data['agent']['valid_mask'][:, :, : self.historical_steps]
-        agent_key_padding = ~(agent_mask.any(-1))
+        agent_mask = data['agent']['valid_mask'][:, :,self.historical_steps:]
+        agent_key_padding = ~agent_mask
 
         polygon_mask = data["map"]["valid_mask"]
         map_key_padding = ~polygon_mask.any(-1)
 
         logits, probs = self.linear_scorer_layer(
-            x_agent,
+            x,
             x_polygon,
             agent_mask=agent_key_padding,
             lane_mask=map_key_padding,
@@ -93,8 +117,8 @@ class TB(pl.LightningModule):
         return logits, probs
     def training_step(self, data, batch_idx):
         logits, probs  = self(data)
-        target_lane_id = data['agent']['agent_lane_id_target'][:,:,self.historical_steps-1:].long()
-        agent_mask = data['agent']['valid_mask'][:,:,self.historical_steps-1:]
+        target_lane_id = data['agent']['agent_lane_id_target'][:,:,self.historical_steps:].long()
+        agent_mask = data['agent']['valid_mask'][:,:,self.historical_steps:]
         # 如果agent_mask为False，则对应的target_lane_id设为-100
         ignore_index = -100
         target_lane_id = target_lane_id.masked_fill(~agent_mask, ignore_index)
@@ -119,8 +143,8 @@ class TB(pl.LightningModule):
 
     def validation_step(self, data, batch_idx):
         logits, probs  = self(data)
-        target_lane_id = data['agent']['agent_lane_id_target'][:,:,self.historical_steps-1:].long()
-        agent_mask = data['agent']['valid_mask'][:,:,self.historical_steps-1:]
+        target_lane_id = data['agent']['agent_lane_id_target'][:,:,self.historical_steps:].long()
+        agent_mask = data['agent']['valid_mask'][:,:,self.historical_steps:]
         # 如果agent_mask为False，则对应的target_lane_id设为-100
         ignore_index = -100
         target_lane_id = target_lane_id.masked_fill(~agent_mask, ignore_index)
@@ -206,7 +230,7 @@ class TB(pl.LightningModule):
     @staticmethod
     def add_model_specific_args(parent_parser):
         parser = parent_parser.add_argument_group('HiVT')
-        parser.add_argument('--historical_steps', type=int, default=21)
+        parser.add_argument('--historical_steps', type=int, default=20)
         parser.add_argument('--future_steps', type=int, default=30)
         parser.add_argument('--num_modes', type=int, default=6)
         parser.add_argument('--rotate', type=bool, default=True)
